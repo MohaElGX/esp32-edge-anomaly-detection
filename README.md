@@ -10,6 +10,7 @@ Este proyecto comienza en Agosto de 2026, como una propuesta de detección de an
 Para el desarrollo de este objetivo se tuvo que implementar un sistema de aprendizaje no supervisado, que se detallará más adelante.
 
 ##  Proceso de Montaje
+![Foto del montaje completo](docs/montaje.png)
 Para comenzar con este proyecto se tuvo que aprender a manejar los componentes electrónicos del ESP32, así como las conexiones, entradas salidas, módulos, conexión a internet, voltajes, librerías para el manejo de estos componentes, Google Sheets para empaquetar los datos y mandarlos a un Google Sheet para poder mantener el sistema funcionando de forma constante sin necesidad de conectarse por cable o wifi a un ordenador siempre encendido. 
 Una vez entendidas estas bases se procedió con el montaje y testing de los módulos individuales, ante lo cual surgieron diversos problemas:
 
@@ -43,5 +44,64 @@ Estos datos del csv reflejan el comportamiento del modelo, dando varios conjunto
 Fuente: meteoblue, simulación del modelo NEMSGLOBAL.
 
 En total se marcaron 132 puntos atípicos, haciendo uso de 15 árboles y max_samples=256 dando ~2 900 nodos (~35 KB de arrays), un tamaño que cabe sin problemas en la RAM del ESP32.
+
+## Del PC al ESP32: exportación del modelo
+
+MicroPython no puede ejecutar scikit-learn, pero un Isolation Forest entrenado es solo un conjunto de árboles de decisión. Se exportan los cinco arrays de cada árbol (`feature`, `threshold`, `children_left`, `children_right`, `n_node_samples`) a un módulo `if_data.py` con arrays tipados (`int16`, `float32`, `uint16`), a 12 bytes por nodo:
+
+| | |
+|---|---|
+| Árboles / nodos | 15 / 2 881 (1 448 hojas) |
+| Arrays del modelo | 34 572 B ≈ 33,8 KB |
+| `if_data.py` / `if_data.mpy` | 71,2 KB / 70,8 KB |
+
+El `.mpy` (compilado con `mpy-cross`, que debe coincidir con la versión de MicroPython de la placa) pesa casi lo mismo que el `.py`: su ventaja no es el tamaño sino evitar que la placa tenga que analizar 71 KB de texto al importar, pues Tonny se congelaba al intentar abrir el archivo.
+
+La inferencia (`isolation_forest.py`) reimplementa a mano el cálculo del score: recorre cada árbol hasta una hoja, suma la corrección `c(n)` para las hojas con varias muestras y normaliza con `c(ψ)`:
+
+`s(x) = 2^(−E[h(x)] / c(ψ))`
+
+**Enfoques descartados:** una aproximación lineal (demasiados falsos positivos frente a scikit-learn) y `m2cgen` (no soporta `IsolationForest`).
+
+## Validación del port
+
+Se comparan las decisiones del modelo portado con `modelo.predict` de scikit-learn sobre las 13 133 muestras del dataset:
+
+| Umbral | Anomalías ESP32 | Anomalías sklearn | Discrepancias |
+|---|---|---|---|
+| 0,630481 (inicial) | 81 | 132 | 51 |
+| 0,625447 (calibrado) | 132 | 132 | **0** |
+
+Además, `tests/test_port_fidelity.py` (ejecutado en CI) entrena un modelo sintético, lo exporta y comprueba que los scores portados coinciden con los de scikit-learn.
+
+**Alcance de esta validación:** mide la *fidelidad del port*, no la calidad de la detección, porque no hay etiquetas reales de anomalía. Y el margen es estrecho: entre el dato normal más extremo (0,625399) y la anomalía menos extrema (0,625496) hay solo ≈ 1·10⁻⁴. Con `float32` y umbrales redondeados a 6 decimales, un dato nuevo justo en la frontera podría clasificarse distinto que en scikit-learn.
+
+## Calibración del umbral
+
+scikit-learn fija su frontera de decisión a partir de `contamination` (atributo `offset_`), y el score del port debe compararse con un umbral equivalente. El umbral inicial no reproducía esa frontera (81 detecciones frente a 132), así que se calibró en el punto medio entre las dos clases:
+
+```
+umbral = (0,625496 + 0,625399) / 2 = 0,625447
+```
+
+Se guarda en el modelo con `update_threshold()`. Está calibrado sobre los mismos datos de entrenamiento, algo razonable para medir fidelidad pero que habría que repetir si se reentrena.
+
+## Rendimiento en el ESP32
+
+Medido con `tools/benchmark_esp32.py` tras un reinicio suave, 200 muestras sintéticas, MicroPython v1.28.0 a 160 MHz:
+
+| Métrica | Resultado |
+|---|---|
+| RAM libre antes de cargar el modelo |161920B |
+| Coste en RAM de `if_data` | 132768B |
+| Coste en RAM de `isolation_forest` | 11040B |
+
+## Limitaciones
+
+- `contamination=0,01` marca el 1 % de los datos como anomalía por construcción.
+- Modelo entrenado y validado sobre 13 días de un único entorno.
+- Sin etiquetas reales, la calidad de detección solo se valora de forma cualitativa (p. ej. el día en que se tapó el sensor de luz).
+- Umbral calibrado sobre los datos de entrenamiento, con margen estrecho.
+- DHT11: baja resolución y rango nominal de humedad de 20–90 %.
 
 
