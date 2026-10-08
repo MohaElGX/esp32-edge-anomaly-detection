@@ -10,7 +10,7 @@ Este proyecto comienza en Agosto de 2026, como una propuesta de detección de an
 Para el desarrollo de este objetivo se tuvo que implementar un sistema de aprendizaje no supervisado, que se detallará más adelante.
 
 ##  Proceso de Montaje
-![Foto del montaje completo](docs/montaje.png)
+![Foto del montaje completo](docs/montaje.jpg)
 Para comenzar con este proyecto se tuvo que aprender a manejar los componentes electrónicos del ESP32, así como las conexiones, entradas salidas, módulos, conexión a internet, voltajes, librerías para el manejo de estos componentes, Google Sheets para empaquetar los datos y mandarlos a un Google Sheet para poder mantener el sistema funcionando de forma constante sin necesidad de conectarse por cable o wifi a un ordenador siempre encendido. 
 Una vez entendidas estas bases se procedió con el montaje y testing de los módulos individuales, ante lo cual surgieron diversos problemas:
 
